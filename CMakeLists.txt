@@ -1,60 +1,135 @@
+cmake_minimum_required(VERSION 3.16.0 FATAL_ERROR)
+set(PROJECT_NAME msdf-atlas-gen)
 
-cmake_minimum_required(VERSION 3.10)
-
-project(msdf-atlas-gen VERSION 1.2 LANGUAGES CXX)
-option(MSDF_ATLAS_GEN_BUILD_STANDALONE "Build the msdf-atlas-gen standalone executable" ON)
-set(MSDFGEN_BUILD_MSDFGEN_STANDALONE OFF CACHE BOOL "Build the msdfgen standalone executable")
-set(MSDFGEN_USE_OPENMP OFF CACHE INTERNAL "Build with OpenMP support for multithreaded code (disabled for atlas gen)" FORCE)
-set(MSDFGEN_USE_CPP11 ON CACHE INTERNAL "Build with C++11 enabled (always enabled for atlas gen)" FORCE)
-set(MSDFGEN_INSTALL OFF CACHE BOOL "Generate installation target for msdfgen")
 add_subdirectory(msdfgen)
 
-find_package(Threads REQUIRED)
+################################################################################
+# Target
+################################################################################
+add_library(${PROJECT_NAME} STATIC "")
 
-file(GLOB_RECURSE msdf-atlas-gen_HEADERS RELATIVE ${CMAKE_CURRENT_SOURCE_DIR}
-    "msdf-atlas-gen/*.h"
-    "msdf-atlas-gen/*.hpp"
+use_props(${PROJECT_NAME} "${CMAKE_CONFIGURATION_TYPES}" "${DEFAULT_CXX_PROPS}")
+#set(ROOT_NAMESPACE imgui)
+
+set_target_properties(${PROJECT_NAME} PROPERTIES
+    VS_GLOBAL_KEYWORD "Win32Proj"
 )
 
-file(GLOB_RECURSE msdf-atlas-gen_SOURCES RELATIVE ${CMAKE_CURRENT_SOURCE_DIR}
-    "msdf-atlas-gen/*.cpp"
+################################################################################
+# Source groups
+################################################################################
+
+function(ADD_SOURCES_RECURSE RELATIVE_DIR FILE_EXTENSION)
+    file(GLOB_RECURSE Source_Files LIST_DIRECTORIES false RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} ${RELATIVE_DIR}/*.${FILE_EXTENSION})
+    target_sources(${PROJECT_NAME} PUBLIC ${Source_Files})
+endfunction()
+
+ADD_SOURCES_RECURSE(msdf-atlas-gen h)
+ADD_SOURCES_RECURSE(msdf-atlas-gen hpp)
+ADD_SOURCES_RECURSE(msdf-atlas-gen cpp)
+
+################################################################################
+# Output directory
+################################################################################
+set_target_properties(${PROJECT_NAME} PROPERTIES
+    OUTPUT_DIRECTORY_DEBUG   "${CMAKE_SOURCE_DIR}/Bin/$<CONFIG>-${CMAKE_VS_PLATFORM_NAME}/${PROJECT_NAME}/"
+    OUTPUT_DIRECTORY_DIST    "${CMAKE_SOURCE_DIR}/Bin/$<CONFIG>-${CMAKE_VS_PLATFORM_NAME}/${PROJECT_NAME}/"
+    OUTPUT_DIRECTORY_RELEASE "${CMAKE_SOURCE_DIR}/Bin/$<CONFIG>-${CMAKE_VS_PLATFORM_NAME}/${PROJECT_NAME}/"
+)
+set_target_properties(${PROJECT_NAME} PROPERTIES
+    INTERPROCEDURAL_OPTIMIZATION_DIST    "TRUE"
+    INTERPROCEDURAL_OPTIMIZATION_RELEASE "TRUE"
+    LINKER_LANGUAGE CXX
+    CXX_STANDARD 20
+    CXX_STANDARD_REQUIRED ON
 )
 
-# msdf-atlas-gen library
-add_library(msdf-atlas-gen ${msdf-atlas-gen_SOURCES} ${msdf-atlas-gen_HEADERS})
-add_library(msdf-atlas-gen::msdf-atlas-gen ALIAS msdf-atlas-gen)
-set_target_properties(msdf-atlas-gen PROPERTIES PUBLIC_HEADER "${msdf-atlas-gen_HEADERS}")
-target_include_directories(msdf-atlas-gen
-INTERFACE
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
-PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/msdfgen/include # for lodepng.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/artery-font-format
+################################################################################
+# MSVC runtime library
+################################################################################
+get_property(MSVC_RUNTIME_LIBRARY_DEFAULT TARGET ${PROJECT_NAME} PROPERTY MSVC_RUNTIME_LIBRARY)
+string(CONCAT "MSVC_RUNTIME_LIBRARY_STR"
+    $<$<CONFIG:Debug>:
+        MultiThreadedDebug
+    >
+    $<$<CONFIG:Dist>:
+        MultiThreaded
+    >
+    $<$<CONFIG:Release>:
+        MultiThreaded
+    >
+    #$<$<NOT:$<OR:$<CONFIG:Dist>,$<CONFIG:Release>>>:${MSVC_RUNTIME_LIBRARY_DEFAULT}>
+)
+set_target_properties(${PROJECT_NAME} PROPERTIES MSVC_RUNTIME_LIBRARY ${MSVC_RUNTIME_LIBRARY_STR})
+
+
+################################################################################
+# Include Directories
+################################################################################
+
+target_include_directories(${PROJECT_NAME} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/msdf-atlas-gen"
+                                                   "${CMAKE_CURRENT_SOURCE_DIR}/msdfgen"
+                                                   "${CMAKE_CURRENT_SOURCE_DIR}/msdfgen/include")
+
+
+################################################################################
+# Compile definitions
+################################################################################
+target_compile_definitions(${PROJECT_NAME} PRIVATE
+    "$<$<CONFIG:Debug>:"
+        "_DEBUG;"
+    ">"
+    "$<$<CONFIG:Dist>:"
+        "NDEBUG"
+    ">"
+    "$<$<CONFIG:Release>:"
+        "NDEBUG"
+    ">"
+    "_CONSOLE;"
+    "UNICODE;"
+    "_UNICODE;"
+
+	"FT2_BUILD_LIBRARY"
+	"_CRT_SECURE_NO_WARNINGS"
+	"_CRT_NONSTDC_NO_WARNINGS"
 )
 
-if (MSVC)
-    target_compile_definitions(msdf-atlas-gen PUBLIC _CRT_SECURE_NO_WARNINGS)
+################################################################################
+# Compile and link options
+################################################################################
+if(MSVC)
+    target_compile_options(${PROJECT_NAME} PRIVATE
+        $<$<CONFIG:Dist>:
+            /Oi;
+            /Gy;
+            /arch:AVX2; #vectorextensions
+            /arch:BMI; /arch:POPCNT; /arch:LZCNT; /arch:F16C; #isaextensions
+        >
+        $<$<CONFIG:Release>:
+            /Oi;
+            /Gy;
+            /arch:AVX2; #vectorextensions
+            /arch:BMI; /arch:POPCNT; /arch:LZCNT; /arch:F16C; #isaextensions
+        >
+        /permissive-;
+        /sdl;
+        /W3;
+        ${DEFAULT_CXX_DEBUG_INFORMATION_FORMAT};
+        ${DEFAULT_CXX_EXCEPTION_HANDLING}
+    )
+    target_link_options(${PROJECT_NAME} PRIVATE
+        $<$<CONFIG:Dist>:
+            /OPT:REF;
+            /OPT:ICF
+        >
+        $<$<CONFIG:Release>:
+            /OPT:REF;
+            /OPT:ICF
+        >
+        /DEBUG;
+        /SUBSYSTEM:CONSOLE
+    )
 endif()
-target_compile_features(msdf-atlas-gen PUBLIC cxx_std_11)
-target_link_libraries(msdf-atlas-gen PUBLIC Threads::Threads msdfgen::msdfgen msdfgen::msdfgen-ext)
 
-# TODO make these public in msdfgen so that this doesn't have to be repeated here
-if(FREETYPE_WITH_PNG)
-    find_package(ZLIB REQUIRED)
-    find_package(PNG REQUIRED)
-    target_link_libraries(msdf-atlas-gen PUBLIC ZLIB::ZLIB PNG::PNG)
-endif()
-if(FREETYPE_WITH_HARFBUZZ)
-    # No FindHarfBuzz.cmake available so falling back to CMAKE_LIBRARY_PATH
-    find_library(FREETYPE_HARFBUZZ_LIB "harfbuzz")
-    target_link_libraries(msdf-atlas-gen PUBLIC "${FREETYPE_HARFBUZZ_LIB}")
-endif()
 
-# msdf-atlas-gen standalone executable
-if(MSDF_ATLAS_GEN_BUILD_STANDALONE)
-    add_executable(msdf-atlas-gen-standalone msdf-atlas-gen/main.cpp)
-    set_target_properties(msdf-atlas-gen-standalone PROPERTIES ARCHIVE_OUTPUT_DIRECTORY archive OUTPUT_NAME msdf-atlas-gen)
-    target_compile_definitions(msdf-atlas-gen-standalone PUBLIC MSDF_ATLAS_STANDALONE)
-    target_compile_features(msdf-atlas-gen-standalone PUBLIC cxx_std_11)
-    target_link_libraries(msdf-atlas-gen-standalone PUBLIC msdf-atlas-gen::msdf-atlas-gen)
-endif()
+target_link_libraries(${PROJECT_NAME} PRIVATE msdfgen)
